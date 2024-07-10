@@ -17,7 +17,7 @@ DEFAULT_IMAGE_PATCH_TOKEN = "<im_patch>"
 DEFAULT_IM_START_TOKEN = "<im_start>"
 DEFAULT_IM_END_TOKEN = "<im_end>"
 
-    
+
 
 def init_omni_lmm(model_path):
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -28,10 +28,10 @@ def init_omni_lmm(model_path):
         model_name, model_max_length=2048)
 
     if False:
-        # model on multiple devices for small size gpu memory (Nvidia 3090 24G x2) 
+        # model on multiple devices for small size gpu memory (Nvidia 3090 24G x2)
         with init_empty_weights():
             model = OmniLMMForCausalLM.from_pretrained(model_name, tune_clip=True, torch_dtype=torch.bfloat16)
-        model = load_checkpoint_and_dispatch(model, model_name, dtype=torch.bfloat16, 
+        model = load_checkpoint_and_dispatch(model, model_name, dtype=torch.bfloat16,
                     device_map="auto",  no_split_module_classes=['Eva','MistralDecoderLayer', 'ModuleList', 'Resampler']
         )
     else:
@@ -129,7 +129,7 @@ class OmniLMM12B:
         out = self.decode(image, input_ids)
 
         return out
-        
+
 
 def img2base64(file_name):
     with open(file_name, 'rb') as f:
@@ -149,7 +149,7 @@ class MiniCPMV:
             return "Image decode error"
 
         msgs = json.loads(input['question'])
-        
+
         answer, context, _ = self.model.chat(
             image=image,
             msgs=msgs,
@@ -162,9 +162,13 @@ class MiniCPMV:
 
 class MiniCPMV2_5:
     def __init__(self, model_path) -> None:
-        self.model = AutoModel.from_pretrained(model_path, trust_remote_code=True).to(dtype=torch.float16)
+        if "int4" in model_path:
+            self.model = AutoModel.from_pretrained(model_path, trust_remote_code=True)
+            self.model.eval()
+        else:
+            self.model = AutoModel.from_pretrained(model_path, trust_remote_code=True).to(dtype=torch.float16)
+            self.model.eval().cuda()
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-        self.model.eval().cuda()
 
     def chat(self, input):
         try:
@@ -173,13 +177,22 @@ class MiniCPMV2_5:
             return "Image decode error"
 
         msgs = json.loads(input['question'])
-        
+
         answer = self.model.chat(
             image=image,
             msgs=msgs,
             tokenizer=self.tokenizer,
             sampling=True,
             temperature=0.7
+    	)
+        return answer
+
+    def chat_msgs(self, msgs):
+        answer = self.model.chat(
+            msgs=msgs,
+            image=None,
+            context=None,
+            tokenizer=self.tokenizer,
     	)
         return answer
 
@@ -198,19 +211,19 @@ class MiniCPMVChat:
 
 
 if __name__ == '__main__':
-    
+
     model_path = 'openbmb/OmniLMM-12B'
     chat_model = MiniCPMVChat(model_path)
 
     im_64 = img2base64('./assets/worldmap_ck.jpg')
 
-    # first round chat 
+    # first round chat
     msgs = [{"role": "user", "content": "What is interesting about this image?"}]
     input = {"image": im_64, "question": json.dumps(msgs, ensure_ascii=True)}
     answer = chat_model.chat(input)
     print(msgs[-1]["content"]+'\n', answer)
 
-    # second round chat 
+    # second round chat
     msgs.append({"role": "assistant", "content": answer})
     msgs.append({"role": "user", "content": "Where is China in the image"})
     input = {"image": im_64,"question": json.dumps(msgs, ensure_ascii=True)}
